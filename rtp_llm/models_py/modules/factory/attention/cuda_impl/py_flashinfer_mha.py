@@ -81,6 +81,13 @@ class PyFlashinferPrefillPagedAttnOp(object):
         self.head_dim_vo = attn_configs.size_per_head
         self.page_size = attn_configs.kernel_tokens_per_block
         self.datatype = attn_configs.dtype
+        self.kv_cache_dtype = attn_configs.kv_cache_dtype
+        if self.kv_cache_dtype == KvCacheDataType.INT8:
+            self.kv_datatype = torch.int8
+        elif self.kv_cache_dtype == KvCacheDataType.FP8:
+            self.kv_datatype = torch.float8_e4m3fn
+        else:
+            self.kv_datatype = self.datatype
         self.max_seq_len = attn_configs.max_seq_len
         self.is_causal = attn_configs.is_causal
         self.fmha_params = rtp_llm_ops.FlashInferMlaAttnParams()
@@ -202,7 +209,7 @@ class PyFlashinferPrefillPagedAttnOp(object):
             self.page_size,
             causal=self.is_causal,
             q_data_type=self.datatype,
-            kv_data_type=self.datatype,
+            kv_data_type=self.kv_datatype,
         )
         return self.fmha_params
 
