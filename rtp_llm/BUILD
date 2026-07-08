@@ -575,7 +575,7 @@ whl_reqs = [
     "sentencepiece==0.2.0",
     "fastapi==0.115.6",
     "grpcio-tools==1.57.0",
-    "uvicorn==0.30.0",
+    "uvicorn[standard]==0.30.0",
     "setuptools==60.5.0",
     "dacite",
     "pynvml",
