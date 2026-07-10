@@ -12,24 +12,39 @@ class ConcurrencyController:
     def __init__(self, max_concurrency: int = 1) -> None:
         self.max_concurrency = max_concurrency
         self.lock = Lock()
-        self.current_concurrency = Value("i", 0)
-        self.request_counter = Value("i", 0)
+        # Use lock=False: all writes are protected by self.lock, and reads of
+        # a single aligned int from shared memory are atomic on x86/ARM.
+        # Removing the implicit per-Value lock avoids redundant syscall overhead,
+        # especially on the fast-path where most requests are rejected without
+        # acquiring self.lock.
+        self.current_concurrency = Value("i", 0, lock=False)
+        self.request_counter = Value("i", 0, lock=False)
 
     def get_available_concurrency(self) -> int:
         with self.lock:
             return self.max_concurrency - self.current_concurrency.value
 
     def increment(self) -> None:
-        while True:
-            with self.lock:
-                if self.current_concurrency.value < self.max_concurrency:
-                    self.current_concurrency.value += 1
-                    self.request_counter.value += 1
-                    return self.request_counter.value
+        # Fast path: lock-free observation.  When the limit is already reached,
+        # reject immediately without acquiring the cross-process lock.  This
+        # prevents the event loop from being starved by lock contention under
+        # high-volume 503 storms.
+        if self.current_concurrency.value >= self.max_concurrency:
+            raise ConcurrencyException(
+                f"Concurrency limit {self.max_concurrency} reached"
+            )
 
-                raise ConcurrencyException(
-                    f"Concurrency limit {self.max_concurrency} reached"
-                )
+        # Slow path: capacity appears available — acquire lock and double-check
+        # (TOCTOU guard: value may have changed between observation and lock).
+        with self.lock:
+            if self.current_concurrency.value < self.max_concurrency:
+                self.current_concurrency.value += 1
+                self.request_counter.value += 1
+                return self.request_counter.value
+
+            raise ConcurrencyException(
+                f"Concurrency limit {self.max_concurrency} reached"
+            )
 
     def decrement(self) -> None:
         with self.lock:
